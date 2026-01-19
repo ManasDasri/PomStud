@@ -1,4 +1,3 @@
-
 // Install dependencies: npm install express socket.io cors
 // Run: node server.js
 
@@ -35,13 +34,8 @@ io.on('connection', (socket) => {
         room.users.push({ id: socket.id, name: userName });
         room.tasks[socket.id] = [];
 
-        // Notify others in room
-        socket.to(roomId).emit('user-joined', { 
-            userId: socket.id, 
-            userName,
-            currentTimer: room.timer,
-            allTasks: room.tasks
-        });
+        console.log(`${userName} (${socket.id}) joined room ${roomId}`);
+        console.log(`Room ${roomId} now has ${room.users.length} users`);
 
         // Send current room state to new user
         socket.emit('room-state', {
@@ -50,18 +44,33 @@ io.on('connection', (socket) => {
             tasks: room.tasks
         });
 
-        console.log(`${userName} joined room ${roomId}`);
+        // Notify others in room about new user
+        socket.to(roomId).emit('user-joined', { 
+            userId: socket.id, 
+            userName,
+            currentTimer: room.timer,
+            allTasks: room.tasks
+        });
+
+        // Send list of existing peers to new user for direct connection
+        const otherUsers = room.users.filter(u => u.id !== socket.id);
+        if (otherUsers.length > 0) {
+            socket.emit('existing-users', otherUsers.map(u => ({ id: u.id, name: u.name })));
+        }
     });
 
     socket.on('webrtc-offer', ({ roomId, offer, targetId }) => {
+        console.log(`Forwarding offer from ${socket.id} to ${targetId}`);
         socket.to(targetId).emit('webrtc-offer', { offer, senderId: socket.id });
     });
 
     socket.on('webrtc-answer', ({ roomId, answer, targetId }) => {
+        console.log(`Forwarding answer from ${socket.id} to ${targetId}`);
         socket.to(targetId).emit('webrtc-answer', { answer, senderId: socket.id });
     });
 
     socket.on('webrtc-ice-candidate', ({ roomId, candidate, targetId }) => {
+        console.log(`Forwarding ICE candidate from ${socket.id} to ${targetId}`);
         socket.to(targetId).emit('webrtc-ice-candidate', { candidate, senderId: socket.id });
     });
 
@@ -92,8 +101,11 @@ io.on('connection', (socket) => {
                 
                 socket.to(roomId).emit('user-left', socket.id);
                 
+                console.log(`Room ${roomId} now has ${room.users.length} users`);
+                
                 if (room.users.length === 0) {
                     rooms.delete(roomId);
+                    console.log(`Room ${roomId} deleted (empty)`);
                 }
             }
         });
