@@ -1,0 +1,180 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Buddy - Focus Together</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-mode">
+    <div class="theme-toggle" onclick="toggleTheme()">
+        <span class="theme-icon">🌙</span>
+    </div>
+
+    <div class="container">
+        <div class="header">
+            <h1>Stud bud</h1>
+            <p>Video calls + Pomodoro + Tasks</p>
+        </div>
+
+        <!-- Setup Screen -->
+        <div class="setup-screen" id="setupScreen">
+            <div class="setup-card">
+                <h2>Join or Create a Study Room</h2>
+                
+                <div class="input-group">
+                    <label for="nameInput">Your Name</label>
+                    <input type="text" id="nameInput" placeholder="Enter your name" autofocus>
+                </div>
+
+                <div class="input-group">
+                    <label for="roomInput">Room ID (optional)</label>
+                    <input type="text" id="roomInput" placeholder="Leave empty to create new room">
+                </div>
+
+                <button class="btn btn-primary" id="joinBtn">
+                    <span>Join Room</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                </button>
+
+                <div class="room-link-section hidden" id="roomLinkSection">
+                    <p class="share-text">Share this link with your study buddy:</p>
+                    <div class="link-box">
+                        <code id="roomLink"></code>
+                        <button class="copy-btn" onclick="copyRoomLink()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="connection-status hidden" id="connectionStatus">
+                    <div class="status-indicator">
+                        <div class="pulse"></div>
+                        <span>Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Screen -->
+        <div class="main-screen hidden" id="mainScreen">
+            <div class="main-grid">
+                <!-- Video Section -->
+                <div class="video-section">
+                    <div class="video-grid">
+                        <div class="video-container">
+                            <video id="localVideo" autoplay muted playsinline></video>
+                            <div class="video-overlay">
+                                <div class="video-label">You</div>
+                                <div class="video-controls">
+                                    <button class="control-btn" id="toggleAudio" onclick="toggleAudio()">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                                            <line x1="12" y1="19" x2="12" y2="23"/>
+                                            <line x1="8" y1="23" x2="16" y2="23"/>
+                                        </svg>
+                                    </button>
+                                    <button class="control-btn" id="toggleVideo" onclick="toggleVideo()">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                                            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="video-container">
+                            <video id="remoteVideo" autoplay playsinline></video>
+                            <div class="video-overlay">
+                                <div class="video-label" id="remoteLabel">Waiting for friend...</div>
+                            </div>
+                            <div class="connection-indicator hidden" id="connectionIndicator">
+                                <div class="spinner"></div>
+                                <span>Connecting...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pomodoro Section -->
+                <div class="pomodoro-section">
+                    <h2>🍅 Pomodoro Timer</h2>
+                    <div class="timer-status" id="timerStatus">Ready to focus</div>
+                    <div class="timer-display" id="timerDisplay">25:00</div>
+                    <div class="timer-progress">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    
+                    <div class="timer-controls">
+                        <button class="btn btn-timer" id="startBtn" onclick="toggleTimer()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                            </svg>
+                            <span>Start</span>
+                        </button>
+                        <button class="btn btn-timer" id="resetBtn" onclick="resetTimer()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 4 23 10 17 10"></polyline>
+                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                            </svg>
+                            <span>Reset</span>
+                        </button>
+                    </div>
+
+                    <div class="timer-settings">
+                        <div class="setting-group">
+                            <label>Focus</label>
+                            <input type="number" id="focusTime" value="25" min="1" max="60">
+                            <span>min</span>
+                        </div>
+                        <div class="setting-group">
+                            <label>Break</label>
+                            <input type="number" id="breakTime" value="5" min="1" max="30">
+                            <span>min</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tasks Section -->
+            <div class="tasks-section">
+                <div class="task-list">
+                    <div class="task-header">
+                        <h3>Your Tasks</h3>
+                        <span class="task-count" id="myTaskCount">0</span>
+                    </div>
+                    <div class="task-input">
+                        <input type="text" id="myTaskInput" placeholder="What do you want to accomplish?">
+                        <button class="add-task-btn" onclick="addMyTask()">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="task-items" id="myTasks"></div>
+                </div>
+
+                <div class="task-list">
+                    <div class="task-header">
+                        <h3><span id="friendName">Friend</span>'s Tasks</h3>
+                        <span class="task-count" id="friendTaskCount">0</span>
+                    </div>
+                    <div class="task-items" id="friendTasks"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
