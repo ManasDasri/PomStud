@@ -7,7 +7,6 @@ let localStream;
 let peerConnections = new Map();
 let roomId;
 let userName;
-let remotePeerId;
 let friendName = 'Friend';
 
 // Timer state
@@ -39,6 +38,18 @@ const config = {
 // ============================================
 
 document.getElementById('joinBtn').addEventListener('click', joinRoom);
+document.getElementById('createRoomBtn').addEventListener('click', createNewRoom);
+
+async function createNewRoom() {
+    userName = document.getElementById('nameInput').value.trim();
+    if (!userName) {
+        alert('Please enter your name');
+        return;
+    }
+
+    roomId = generateRoomId();
+    await proceedToRoom();
+}
 
 async function joinRoom() {
     userName = document.getElementById('nameInput').value.trim();
@@ -48,35 +59,59 @@ async function joinRoom() {
     }
 
     const roomInput = document.getElementById('roomInput').value.trim();
-    roomId = roomInput || generateRoomId();
+    if (!roomInput) {
+        alert('Please enter a room code to join');
+        return;
+    }
 
+    roomId = roomInput;
+    await proceedToRoom();
+}
+
+async function proceedToRoom() {
+    // Show connecting status
     document.getElementById('connectionStatus').classList.remove('hidden');
+    document.getElementById('joinBtn').disabled = true;
+    document.getElementById('createRoomBtn').disabled = true;
 
     // Show room link
     const link = `${window.location.origin}${window.location.pathname}?room=${roomId}`;
     document.getElementById('roomLink').textContent = link;
+    document.getElementById('roomCode').textContent = roomId;
     document.getElementById('roomLinkSection').classList.remove('hidden');
 
-    // Initialize media
-    await initMedia();
+    try {
+        // Initialize media first
+        await initMedia();
 
-    // Join room via Socket.io
-    socket.emit('join-room', { roomId, userName });
+        // Then join room via Socket.io
+        socket.emit('join-room', { roomId, userName });
 
-    setTimeout(() => {
-        document.getElementById('setupScreen').classList.add('hidden');
-        document.getElementById('mainScreen').classList.remove('hidden');
-    }, 1000);
+        // Wait a bit for connection to establish
+        setTimeout(() => {
+            document.getElementById('setupScreen').classList.add('hidden');
+            document.getElementById('mainScreen').classList.remove('hidden');
+        }, 1500);
+    } catch (error) {
+        console.error('Error setting up room:', error);
+        alert('Failed to access camera/microphone. Please check permissions and try again.');
+        document.getElementById('connectionStatus').classList.add('hidden');
+        document.getElementById('joinBtn').disabled = false;
+        document.getElementById('createRoomBtn').disabled = false;
+    }
 }
 
 function generateRoomId() {
-    return Math.random().toString(36).substring(2, 12);
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
 async function initMedia() {
     try {
         localStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 1280, height: 720 },
+            video: { 
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
@@ -84,9 +119,10 @@ async function initMedia() {
             }
         });
         document.getElementById('localVideo').srcObject = localStream;
+        console.log('Local media initialized');
     } catch (error) {
         console.error('Error accessing media:', error);
-        alert('Could not access camera/microphone. Please check permissions.');
+        throw error;
     }
 }
 
@@ -95,7 +131,7 @@ async function initMedia() {
 // ============================================
 
 socket.on('room-state', ({ users, timer, tasks }) => {
-    console.log('Room state:', users);
+    console.log('Room state received:', users);
     if (users.length > 0) {
         friendName = users[0].name;
         document.getElementById('friendName').textContent = friendName;
@@ -113,15 +149,23 @@ socket.on('room-state', ({ users, timer, tasks }) => {
     }
 });
 
+socket.on('existing-users', (users) => {
+    console.log('Existing users in room:', users);
+    // Initiate connections to all existing users
+    users.forEach(user => {
+        createPeerConnection(user.id, true); // true = create offer
+    });
+});
+
 socket.on('user-joined', ({ userId, userName: name, currentTimer, allTasks }) => {
-    console.log('User joined:', name);
-    remotePeerId = userId;
+    console.log('User joined:', name, userId);
     friendName = name;
     document.getElementById('friendName').textContent = friendName;
     document.getElementById('remoteLabel').textContent = friendName;
     document.getElementById('connectionIndicator').classList.remove('hidden');
     
-    createPeerConnection(userId);
+    // Don't create offer here - wait for the new user to create it
+    createPeerConnection(userId, false); // false = wait for offer
     
     if (currentTimer) {
         syncTimerState(currentTimer);
@@ -140,37 +184,56 @@ socket.on('user-left', (userId) => {
     }
     document.getElementById('remoteVideo').srcObject = null;
     document.getElementById('remoteLabel').textContent = 'Waiting for friend...';
+    document.getElementById('connectionIndicator').classList.add('hidden');
 });
 
 socket.on('webrtc-offer', async ({ offer, senderId }) => {
     console.log('Received offer from:', senderId);
-    remotePeerId = senderId;
     
-    const pc = createPeerConnection(senderId);
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const pc = createPeerConnection(senderId, false);
     
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    
-    socket.emit('webrtc-answer', { 
-        roomId, 
-        answer, 
-        targetId: senderId 
-    });
+    try {
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        console.log('Set remote description (offer)');
+        
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log('Created and set local description (answer)');
+        
+        socket.emit('webrtc-answer', { 
+            roomId, 
+            answer, 
+            targetId: senderId 
+        });
+        console.log('Sent answer to', senderId);
+    } catch (error) {
+        console.error('Error handling offer:', error);
+    }
 });
 
 socket.on('webrtc-answer', async ({ answer, senderId }) => {
     console.log('Received answer from:', senderId);
     const pc = peerConnections.get(senderId);
     if (pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        try {
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+            console.log('Set remote description (answer)');
+        } catch (error) {
+            console.error('Error setting remote description:', error);
+        }
     }
 });
 
 socket.on('webrtc-ice-candidate', async ({ candidate, senderId }) => {
+    console.log('Received ICE candidate from:', senderId);
     const pc = peerConnections.get(senderId);
     if (pc && candidate) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+            console.log('Added ICE candidate');
+        } catch (error) {
+            console.error('Error adding ICE candidate:', error);
+        }
     }
 });
 
@@ -189,11 +252,13 @@ socket.on('task-sync', ({ userId, tasks }) => {
 // WebRTC
 // ============================================
 
-function createPeerConnection(peerId) {
+function createPeerConnection(peerId, createOffer) {
     if (peerConnections.has(peerId)) {
+        console.log('Peer connection already exists for', peerId);
         return peerConnections.get(peerId);
     }
 
+    console.log('Creating peer connection for', peerId, 'createOffer:', createOffer);
     const pc = new RTCPeerConnection(config);
     peerConnections.set(peerId, pc);
 
@@ -201,15 +266,17 @@ function createPeerConnection(peerId) {
     if (localStream) {
         localStream.getTracks().forEach(track => {
             pc.addTrack(track, localStream);
+            console.log('Added local track:', track.kind);
         });
     }
 
     // Handle remote stream
     pc.ontrack = (event) => {
-        console.log('Received remote track');
+        console.log('Received remote track:', event.track.kind);
         const remoteVideo = document.getElementById('remoteVideo');
         if (remoteVideo.srcObject !== event.streams[0]) {
             remoteVideo.srcObject = event.streams[0];
+            console.log('Set remote video stream');
             document.getElementById('connectionIndicator').classList.add('hidden');
         }
     };
@@ -217,12 +284,18 @@ function createPeerConnection(peerId) {
     // ICE candidates
     pc.onicecandidate = (event) => {
         if (event.candidate) {
+            console.log('Sending ICE candidate to', peerId);
             socket.emit('webrtc-ice-candidate', {
                 roomId,
                 candidate: event.candidate,
                 targetId: peerId
             });
         }
+    };
+
+    // Connection state changes
+    pc.oniceconnectionstatechange = () => {
+        console.log('ICE connection state:', pc.iceConnectionState);
     };
 
     pc.onconnectionstatechange = () => {
@@ -235,16 +308,24 @@ function createPeerConnection(peerId) {
     };
 
     // Create offer if initiator
-    if (peerId === remotePeerId) {
-        pc.createOffer().then(offer => {
-            return pc.setLocalDescription(offer);
-        }).then(() => {
-            socket.emit('webrtc-offer', {
-                roomId,
-                offer: pc.localDescription,
-                targetId: peerId
+    if (createOffer) {
+        console.log('Creating offer for', peerId);
+        pc.createOffer()
+            .then(offer => {
+                console.log('Created offer');
+                return pc.setLocalDescription(offer);
+            })
+            .then(() => {
+                console.log('Set local description, sending offer');
+                socket.emit('webrtc-offer', {
+                    roomId,
+                    offer: pc.localDescription,
+                    targetId: peerId
+                });
+            })
+            .catch(error => {
+                console.error('Error creating offer:', error);
             });
-        });
     }
 
     return pc;
@@ -404,7 +485,6 @@ function broadcastTimerState() {
 function playNotificationSound() {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     
-    // Create a more pleasant chime sound
     [523.25, 659.25, 783.99].forEach((freq, i) => {
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
@@ -537,6 +617,7 @@ window.addEventListener('load', () => {
     const room = params.get('room');
     if (room) {
         document.getElementById('roomInput').value = room;
+        document.getElementById('roomInput').focus();
     }
 });
 
@@ -556,6 +637,18 @@ function copyRoomLink() {
         `;
         setTimeout(() => {
             btn.innerHTML = originalHTML;
+        }, 2000);
+    });
+}
+
+function copyRoomCode() {
+    const code = document.getElementById('roomCode').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        const btn = event.target.closest('button');
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => {
+            btn.textContent = originalText;
         }, 2000);
     });
 }
