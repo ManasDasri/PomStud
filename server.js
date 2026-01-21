@@ -1,6 +1,3 @@
-// Install dependencies: npm install express socket.io cors
-// Run: node server.js
-
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -12,7 +9,9 @@ const io = socketIo(server, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
-    }
+    },
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 app.use(cors());
@@ -24,6 +23,8 @@ io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
     socket.on('join-room', ({ roomId, userName }) => {
+        console.log(`${userName} (${socket.id}) joining room ${roomId}`);
+        
         socket.join(roomId);
         
         if (!rooms.has(roomId)) {
@@ -31,47 +32,63 @@ io.on('connection', (socket) => {
         }
         
         const room = rooms.get(roomId);
+        
+        // Remove any existing entry for this socket (reconnection case)
+        room.users = room.users.filter(u => u.id !== socket.id);
+        
         room.users.push({ id: socket.id, name: userName });
-        room.tasks[socket.id] = [];
+        room.tasks[socket.id] = room.tasks[socket.id] || [];
 
-        console.log(`${userName} (${socket.id}) joined room ${roomId}`);
-        console.log(`Room ${roomId} now has ${room.users.length} users`);
+        // Get all other users in the room
+        const otherUsers = room.users.filter(u => u.id !== socket.id);
+        
+        console.log(`Room ${roomId} now has ${room.users.length} users:`, room.users.map(u => u.name));
 
         // Send current room state to new user
         socket.emit('room-state', {
-            users: room.users.filter(u => u.id !== socket.id),
+            users: otherUsers,
             timer: room.timer,
-            tasks: room.tasks
+            tasks: room.tasks,
+            yourId: socket.id
         });
 
-        // Notify others in room about new user
+        // Notify all OTHER users in room about the new user
         socket.to(roomId).emit('user-joined', { 
             userId: socket.id, 
-            userName,
-            currentTimer: room.timer,
-            allTasks: room.tasks
+            userName
         });
 
-        // Send list of existing peers to new user for direct connection
-        const otherUsers = room.users.filter(u => u.id !== socket.id);
-        if (otherUsers.length > 0) {
-            socket.emit('existing-users', otherUsers.map(u => ({ id: u.id, name: u.name })));
-        }
+        console.log(`Notified ${otherUsers.length} other users about ${userName} joining`);
+    });
+
+    socket.on('ready-for-webrtc', ({ roomId }) => {
+        console.log(`${socket.id} is ready for WebRTC in room ${roomId}`);
+        socket.to(roomId).emit('peer-ready', { peerId: socket.id });
     });
 
     socket.on('webrtc-offer', ({ roomId, offer, targetId }) => {
         console.log(`Forwarding offer from ${socket.id} to ${targetId}`);
-        socket.to(targetId).emit('webrtc-offer', { offer, senderId: socket.id });
+        io.to(targetId).emit('webrtc-offer', { 
+            offer, 
+            senderId: socket.id 
+        });
     });
 
     socket.on('webrtc-answer', ({ roomId, answer, targetId }) => {
         console.log(`Forwarding answer from ${socket.id} to ${targetId}`);
-        socket.to(targetId).emit('webrtc-answer', { answer, senderId: socket.id });
+        io.to(targetId).emit('webrtc-answer', { 
+            answer, 
+            senderId: socket.id 
+        });
     });
 
     socket.on('webrtc-ice-candidate', ({ roomId, candidate, targetId }) => {
-        console.log(`Forwarding ICE candidate from ${socket.id} to ${targetId}`);
-        socket.to(targetId).emit('webrtc-ice-candidate', { candidate, senderId: socket.id });
+        if (candidate) {
+            io.to(targetId).emit('webrtc-ice-candidate', { 
+                candidate, 
+                senderId: socket.id 
+            });
+        }
     });
 
     socket.on('timer-update', ({ roomId, timerState }) => {
@@ -96,12 +113,13 @@ io.on('connection', (socket) => {
         rooms.forEach((room, roomId) => {
             const userIndex = room.users.findIndex(u => u.id === socket.id);
             if (userIndex !== -1) {
+                const userName = room.users[userIndex].name;
                 room.users.splice(userIndex, 1);
                 delete room.tasks[socket.id];
                 
-                socket.to(roomId).emit('user-left', socket.id);
+                console.log(`${userName} left room ${roomId}. Remaining: ${room.users.length}`);
                 
-                console.log(`Room ${roomId} now has ${room.users.length} users`);
+                socket.to(roomId).emit('user-left', socket.id);
                 
                 if (room.users.length === 0) {
                     rooms.delete(roomId);
@@ -115,4 +133,5 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    console.log(`Access at: http://localhost:${PORT}`);
 });
